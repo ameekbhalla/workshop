@@ -117,23 +117,27 @@ seurat <- subset(seurat,
 
 
 ```{r eval=FALSE, include=FALSE}
-patients <- paste0(
-  "GSE150290/home/",
-  list.files("GSE150290/home/", recursive = TRUE) |> str_extract(".*/hg19") |> unique()
-  )
 
+patients <- paste0(
+  "GSE150290/", 
+  list.files("GSE150290", recursive = TRUE) |> str_extract(".*/hg19") |> na.exclude() |>  unique()
+                   )
 results <- vector("list",length = length(patients))
+sce <- read10xCounts(patients[1])
+e.out <- emptyDrops(counts(sce))
+sce.full <- sce[,which(e.out$FDR <= 0.001)]
+seurat <- as.Seurat(sce.full, data = NULL)
 
 for (i in seq_along(patients))
   {
   results[[i]] <- Read10X(data.dir = patients[i]) 
   results[[i]] <- CreateSeuratObject(counts = results[[i]],
                                      min.cells = 3, # removes genes that are detected in fewer than 3 cells
-                                     project = list.files("GSE150290/home/blrusti/project/01.metaplasia_scRNA/01.Cellranger")[i])
-  results[[i]][["percent.mito"]] <- PercentageFeatureSet(results[[i]], pattern = "^MT-")
-  results[[i]] <- subset(results[[i]], 
-                         subset = nFeature_RNA > 200 & 
-                           percent.mito < 20)
+                                     project = patients[i] |> str_match("_(.*-.?)") |> pluck(2))
+  # results[[i]][["percent.mito"]] <- PercentageFeatureSet(results[[i]], pattern = "^MT-")
+  # results[[i]] <- subset(results[[i]], 
+  #                        subset = nFeature_RNA > 200 & 
+  #                          percent.mito < 20)
   
   # store object 'results[i]' under the name 'seurat[i]' in the global environment
   assign(paste0("seurat", i), results[[i]])
