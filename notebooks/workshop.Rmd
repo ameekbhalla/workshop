@@ -118,27 +118,32 @@ seurat <- subset(seurat,
 
 
 ```{r eval=FALSE, include=FALSE}
-
 patients <- paste0(
   "GSE150290/", 
   list.files("GSE150290", recursive = TRUE) |> str_extract(".*/hg19") |> na.exclude() |>  unique()
                    )
-
 results <- vector("list",length = length(patients))
-
 is.mito  <- read_delim("GSE150290/GSM4546300_Pat01-A/raw_gene_bc_matrices/hg19/genes.tsv", 
     delim = "\t", escape_double = FALSE, 
     col_names = FALSE, trim_ws = TRUE) |>  pull(2) |> str_which("MT-")
-
 for (i in seq_along(patients))
   {
   results[[i]] <- read10xCounts(patients[i])
   results[[i]] <- results[[i]][,which(emptyDrops(counts(results[[i]]))$FDR <= 0.001)]
   results[[i]] <- quickPerCellQC(results[[i]], subsets=list(Mito=is.mito), sub.fields="subsets_Mito_percent")
-  
-  # store object 'results[i]' under the name 'seurat[i]' in the global environment
-  assign(paste0("seurat", i), as.Seurat(results[[i]], data = NULL))
-   }
+  results[[i]] <- NormalizeData(object = results[[i]])
+  results[[i]] <- FindVariableFeatures(object = results[[i]])
+}
+
+# select integration features
+features <- SelectIntegrationFeatures(object.list = results)
+
+# find integration anchors (CCA)
+anchors <- FindIntegrationAnchors(object.list = results,
+                       anchor.features = features)
+
+# integrate data
+seurat.integrated <- IntegrateData(anchorset = anchors)
 ```
 
 # Normalization
