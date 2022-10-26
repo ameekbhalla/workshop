@@ -131,19 +131,30 @@ for (i in seq_along(patients))
   results[[i]] <- read10xCounts(patients[i])
   results[[i]] <- results[[i]][,which(emptyDrops(counts(results[[i]]))$FDR <= 0.001)]
   results[[i]] <- quickPerCellQC(results[[i]], subsets=list(Mito=is.mito), sub.fields="subsets_Mito_percent")
+  results[[i]] <- as.Seurat(results[[i]], data = NULL)
   results[[i]] <- NormalizeData(object = results[[i]])
   results[[i]] <- FindVariableFeatures(object = results[[i]])
 }
 
+results2 <- results[1:2]
 # select integration features
-features <- SelectIntegrationFeatures(object.list = results)
+features <- SelectIntegrationFeatures(object.list = results2)
 
 # find integration anchors (CCA)
-anchors <- FindIntegrationAnchors(object.list = results,
+anchors <- FindIntegrationAnchors(object.list = results2,
                        anchor.features = features)
 
 # integrate data
 seurat.integrated <- IntegrateData(anchorset = anchors)
+
+seurat.integrated <- ScaleData(object = seurat.integrated)
+seurat.integrated <- RunPCA(object = seurat.integrated)
+seurat.integrated <- RunUMAP(object = seurat.integrated, dims = 1:50)
+
+
+p3 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Sample') + theme(legend.position = "none")
+p4 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Type',
+              cols = c('red','green','blue'))
 ```
 
 # Normalization
