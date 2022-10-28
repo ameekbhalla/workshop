@@ -136,12 +136,11 @@ for (i in seq_along(patients))
   results[[i]] <- FindVariableFeatures(object = results[[i]])
 }
 
-results2 <- results[1:2]
 # select integration features
-features <- SelectIntegrationFeatures(object.list = results2)
+features <- SelectIntegrationFeatures(object.list = results)
 
 # find integration anchors (CCA)
-anchors <- FindIntegrationAnchors(object.list = results2,
+anchors <- FindIntegrationAnchors(object.list = results,
                        anchor.features = features)
 
 # integrate data
