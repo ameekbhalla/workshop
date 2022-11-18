@@ -139,12 +139,22 @@ for (i in seq_along(patients))
 # select integration features
 features <- SelectIntegrationFeatures(object.list = results)
 
+# run PCA on each object in the list, which is required for running the alternative reciprocal PCA workflow
+results <- lapply(X = results, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+}) 
+
 # find integration anchors (CCA)
-anchors <- FindIntegrationAnchors(object.list = results,
-                       anchor.features = features)
+# anchors <- FindIntegrationAnchors(object.list = results,
+#                        anchor.features = features)
+
+# reciprocal PCA 
+anchors <- FindIntegrationAnchors(object.list = results, reference = c(1, 3), reduction = "rpca",
+    dims = 1:50)
 
 # integrate data
-seurat.integrated <- IntegrateData(anchorset = anchors)
+seurat.integrated <- IntegrateData(anchorset = anchors, dims = 1:50)
 
 seurat.integrated <- ScaleData(object = seurat.integrated)
 seurat.integrated <- RunPCA(object = seurat.integrated)
