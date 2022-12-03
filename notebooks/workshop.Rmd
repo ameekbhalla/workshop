@@ -164,6 +164,72 @@ seurat.integrated <- RunUMAP(object = seurat.integrated, dims = 1:50)
 p3 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Sample') + theme(legend.position = "none")
 p4 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Type',
               cols = c('red','green','blue'))
+
+library(tensorflow)
+# need to install tensorflow R package first (above)
+# then run tensorflow::install_tensorflow(extra_packages='tensorflow-probability'), 
+# then install cellassign from github: https://github.com/irrationone/cellassign
+library(cellassign) 
+library(org.Hs.eg.db)
+
+seurat_integrated_two_ref <- readRDS("~/workshop/output/seurat_integrated_two_ref.rds")
+seurat.sce <- as.SingleCellExperiment(seurat_integrated_two_ref)
+
+annots <- AnnotationDbi::select(org.Hs.eg.db, keys=rownames(seurat.sce),
+columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>  
+  # filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
+  dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
+  dplyr::select(-n)
+
+rowData(seurat.sce) <- rownames(seurat.sce) |> as.data.frame() |> dplyr::rename(ENSEMBL = 1) |> left_join(annots) |>  dplyr::rename(ensembl = ENSEMBL, Symbol = SYMBOL, gene_name = GENENAME)
+
+# seurat.sce <- seurat.sce[!is.na(rowData(seurat.sce)$Symbol), ]
+
+# create a list of markers
+# you can find cell specific markers here: http://biocc.hrbmu.edu.cn/CellMarker/
+pbmc_marker_list <- list(
+  Monocytes = c("CD14", "CD68"),
+  `T cells` = c("CD2", "CD3D", "TRAC", "IL32", "CD3E", "PTPRC"),
+  `NK cells` = c("GZMK", "KLRF1", "CCL3", "CMC1", "NKG7", "PTPRC"),
+  `Plasma cells` = c("CD27", "IGHG1", "CD79A", "IGHG2", "PTPRC", "IGKC"),
+  `Mature B cells` = c("MS4A1", "LTB", "CD52", "IGHD", "CD79A", "PTPRC", "IGKC"))
+
+# convert your marker gene list from above to a matrix
+pbmc_marker_matrix <- marker_list_to_mat(pbmc_marker_list, include_other = FALSE)
+
+# make sure all your markers were actually observed in your single cell data.  Remove markers that were not detected
+marker_in_sce <- match(rownames(pbmc_marker_matrix), rowData(seurat.sce)$Symbol)
+# stopifnot(all(!is.na(marker_in_sce)))
+
+pbmc_marker_matrix <- pbmc_marker_matrix |>  cbind(marker_in_sce)  |> na.omit()
+
+marker_in_sce <- marker_in_sce |> na.omit()
+
+#subset data to include only markers
+sce_marker <- seurat.sce[marker_in_sce, ]
+stopifnot(all.equal(rownames(pbmc_marker_matrix), rowData(sce_marker)$Symbol))
+
+# compute size factors
+
+assay(seurat.sce, "counts") <- 2^(assay(seurat.sce))
+assay(sce_marker, "counts") <- 2^(assay(sce_marker))
+
+seurat.sce <- scran::computeSumFactors(seurat.sce) # this step takes two hours
+
+# saveRDS(seurat.sce, file="./output/seurat.sce.rds")
+# saveRDS(sce_marker, file="./output/sce_marker.rds")
+
+# run cellAssign
+fit <- cellassign(
+  exprs_obj = sce_marker,
+  marker_gene_info = pbmc_marker_matrix,
+  s = sizeFactors(seurat.sce),
+  shrinkage = TRUE,
+  max_iter_adam = 50,
+  min_delta = 2,
+  verbose = TRUE)
+# a newer version of TensorFlow is required than available via devtools
+# Issue created for developer https://github.com/Irrationone/cellassign/issues/98
 ```
 
 # Normalization
