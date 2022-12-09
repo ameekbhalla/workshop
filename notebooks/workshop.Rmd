@@ -226,6 +226,8 @@ library(org.Hs.eg.db)
 library(SingleR) #automated cell type annotation ('label transfer') using reference data
 library(celldex) #a large collection of reference expression datasets with curated cell type labels for use with SingleR package
 
+library(scater) #quality control and visualization for scRNA-seq data
+
 # seurat_integrated_two_ref <- readRDS("~/workshop/output/seurat_integrated_two_ref.rds")
 # seurat.sce <- as.SingleCellExperiment(seurat_integrated_two_ref)
 
@@ -249,6 +251,12 @@ predictions <- SingleR(test=seurat.sce, assay.type.test=1,
                        ref=Monaco.data, labels=Monaco.data$label.main)
 
 plotScoreHeatmap(predictions)
+
+saveRDS(predictions, file="./output/predictions.rds")
+
+#now add back to singleCellExperiment object (or Seurat objects)
+seurat.sce[["SingleR.labels"]] <- predictions$labels
+plotUMAP(seurat.sce, colour_by = "SingleR.labels")
 ```
 
 # Normalization
