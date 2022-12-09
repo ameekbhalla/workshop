@@ -164,26 +164,14 @@ seurat.integrated <- RunUMAP(object = seurat.integrated, dims = 1:50)
 p3 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Sample') + theme(legend.position = "none")
 p4 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Type',
               cols = c('red','green','blue'))
+```
 
+```{r eval=FALSE, include=FALSE}
 library(tensorflow)
 # need to install tensorflow R package first (above)
 # then run tensorflow::install_tensorflow(extra_packages='tensorflow-probability'), 
 # then install cellassign from github: https://github.com/irrationone/cellassign
 library(cellassign) 
-library(org.Hs.eg.db)
-
-seurat_integrated_two_ref <- readRDS("~/workshop/output/seurat_integrated_two_ref.rds")
-seurat.sce <- as.SingleCellExperiment(seurat_integrated_two_ref)
-
-annots <- AnnotationDbi::select(org.Hs.eg.db, keys=rownames(seurat.sce),
-columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>  
-  # filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
-  dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
-  dplyr::select(-n)
-
-rowData(seurat.sce) <- rownames(seurat.sce) |> as.data.frame() |> dplyr::rename(ENSEMBL = 1) |> left_join(annots) |>  dplyr::rename(ensembl = ENSEMBL, Symbol = SYMBOL, gene_name = GENENAME)
-
-# seurat.sce <- seurat.sce[!is.na(rowData(seurat.sce)$Symbol), ]
 
 # create a list of markers
 # you can find cell specific markers here: http://biocc.hrbmu.edu.cn/CellMarker/
@@ -230,6 +218,37 @@ fit <- cellassign(
   verbose = TRUE)
 # a newer version of TensorFlow is required than available via devtools
 # Issue created for developer https://github.com/Irrationone/cellassign/issues/98
+```
+
+```{r}
+library(org.Hs.eg.db)
+
+library(SingleR) #automated cell type annotation ('label transfer') using reference data
+library(celldex) #a large collection of reference expression datasets with curated cell type labels for use with SingleR package
+
+# seurat_integrated_two_ref <- readRDS("~/workshop/output/seurat_integrated_two_ref.rds")
+# seurat.sce <- as.SingleCellExperiment(seurat_integrated_two_ref)
+
+seurat.sce <- readRDS("~/workshop/output/seurat.sce.rds")
+
+annots <- AnnotationDbi::select(org.Hs.eg.db, keys=rownames(seurat.sce),
+columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>  
+  # filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
+  dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
+  dplyr::select(-n)
+
+rowData(seurat.sce) <- rownames(seurat.sce) |> as.data.frame() |> dplyr::rename(ENSEMBL = 1) |> left_join(annots) |>  dplyr::rename(ensembl = ENSEMBL, Symbol = SYMBOL, gene_name = GENENAME)
+
+# seurat.sce <- seurat.sce[!is.na(rowData(seurat.sce)$Symbol), ]
+
+rownames(seurat.sce) <- rowData(seurat.sce)$Symbol
+
+Monaco.data <- MonacoImmuneData(ensembl = FALSE) #114 bulk RNA-seq samples of sorted immune cell populations that can be found in GSE107011.
+
+predictions <- SingleR(test=seurat.sce, assay.type.test=1, 
+                       ref=Monaco.data, labels=Monaco.data$label.main)
+
+plotScoreHeatmap(predictions)
 ```
 
 # Normalization
