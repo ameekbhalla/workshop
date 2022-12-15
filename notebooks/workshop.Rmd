@@ -130,8 +130,14 @@ for (i in seq_along(patients))
   {
   results[[i]] <- read10xCounts(patients[i])
   results[[i]] <- results[[i]][,which(emptyDrops(counts(results[[i]]))$FDR <= 0.001)]
-  results[[i]] <- quickPerCellQC(results[[i]], subsets=list(Mito=is.mito), sub.fields="subsets_Mito_percent")
+  # results[[i]] <- quickPerCellQC(results[[i]], subsets=list(Mito=is.mito), sub.fields="subsets_Mito_percent")
   results[[i]] <- as.Seurat(results[[i]], data = NULL)
+  results[[i]][["percent.mt"]] <- PercentageFeatureSet(object = results[[i]], pattern = "MT-") 
+  results[[i]] <- subset(results[[i]], subset = 
+                           nCount_RNA < 20000 & 
+                           nCount_RNA > 100 & 
+                           nFeature_RNA > 1000 & 
+                           percent.mt < 10)
   results[[i]] <- NormalizeData(object = results[[i]])
   results[[i]] <- FindVariableFeatures(object = results[[i]])
 }
