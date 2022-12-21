@@ -86,8 +86,8 @@ Here, we will explore three main quality control metrics:
 NOTE: The distribution of percent.mito is suuuuper sample-specific. You'll have to change the cutoffs for your own sample
 ```{r eval=FALSE, include=FALSE}
 seurat[["percent.mito"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
-VlnPlot(seurat, 
-        features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), 
+VlnPlot(seurat1, 
+        features = c("nFeature_originalexp", "nCount_originalexp", "subsets_Mito_percent"), 
         pt.size = 0.25,
         ncol = 3)
 ```
@@ -109,13 +109,9 @@ Filtering thresholds are quite arbitrary right now, but here, removing cells wit
 seurat <- subset(seurat, 
                subset = nFeature_RNA > 200 & 
                  percent.mito < 7.5)
+
+c(224, 257, 334.5, 336, 341, 346, 353, 363, 369, 398, 423.5, 425, 428, 438, 438, 455.5, 460, 468, 473, 484, 489, 504, 520, 522, 526, 528, 529, 530.5, 542, 546, 549, 550, 552, 595, 598, 607.5, 611, 612, 624, 640, 656, 658, 660, 664.5, 674, 681, 697, 730, 797, 811, 844, 888) |> hist()
 ```
-
-```{r}
-
-
-```
-
 
 ```{r eval=FALSE, include=FALSE}
 patients <- paste0(
@@ -130,14 +126,17 @@ for (i in seq_along(patients))
   {
   results[[i]] <- read10xCounts(patients[i])
   results[[i]] <- results[[i]][,which(emptyDrops(counts(results[[i]]))$FDR <= 0.001)]
-  # results[[i]] <- quickPerCellQC(results[[i]], subsets=list(Mito=is.mito), sub.fields="subsets_Mito_percent")
+  results[[i]] <- quickPerCellQC(results[[i]], subsets=list(Mito=is.mito), sub.fields="subsets_Mito_percent")
   results[[i]] <- as.Seurat(results[[i]], data = NULL)
-  results[[i]][["percent.mt"]] <- PercentageFeatureSet(object = results[[i]], pattern = "MT-") 
-  results[[i]] <- subset(results[[i]], subset = 
-                           nCount_RNA < 20000 & 
-                           nCount_RNA > 100 & 
-                           nFeature_RNA > 1000 & 
-                           percent.mt < 10)
+  # results[[i]][["percent.mt"]] <- PercentageFeatureSet(object = results[[i]], pattern = "^MT-")
+  # results[[i]][["percent.hb"]] <- PercentageFeatureSet(object = results[[i]], pattern = "^HB[^(P)]")
+  # # Cho et al also removed cells with (1) sd of all genes per cell < 1; (2) zero UMI count for 90% of all genes
+  # results[[i]] <- subset(results[[i]], subset = 
+  #                          nCount_RNA < 20000 & #sum of counts aka library size
+  #                          nCount_RNA > 100 & #sum of counts aka library size
+  #                          nFeature_RNA > 1000 & #number of detected features
+  #                          percent.mt < 10 &
+  #                          percent.hb < 10 )
   results[[i]] <- NormalizeData(object = results[[i]])
   results[[i]] <- FindVariableFeatures(object = results[[i]])
 }
@@ -226,7 +225,7 @@ fit <- cellassign(
 # Issue created for developer https://github.com/Irrationone/cellassign/issues/98
 ```
 
-```{r}
+```{r annotation}
 library(org.Hs.eg.db)
 
 library(SingleR) #automated cell type annotation ('label transfer') using reference data
@@ -258,11 +257,206 @@ predictions <- SingleR(test=seurat.sce, assay.type.test=1,
 
 plotScoreHeatmap(predictions)
 
-saveRDS(predictions, file="./output/predictions.rds")
+# saveRDS(predictions, file="./output/predictions.rds")
 
 #now add back to singleCellExperiment object (or Seurat objects)
-seurat.sce[["SingleR.labels"]] <- predictions$labels
-plotUMAP(seurat.sce, colour_by = "SingleR.labels")
+seurat.sce[["SingleR.labels"]] <- predictions$labels |> as.factor()
+# plotUMAP(seurat.sce, colour_by = "SingleR.labels")
+```
+
+```{r metadata}
+#appending more patient metadata columns from the paper supplementary file
+# seurat_integrated2 <- as.Seurat(seurat.sce)
+# saveRDS(seurat_integrated2, file="./output/seurat_integrated2.rds")
+
+seurat_integrated2 <- readRDS("~/workshop/output/seurat_integrated2.rds")
+
+patient_data <- data.frame(
+  stringsAsFactors = FALSE,
+           patient = c("01", "01", "02", "02", "03", "03", "04", "04", "05", "05", "06", "06", "07", "07", "08", "08", "09", "09", "10", "10", "11", "11", "12", "12", "13", "13", "14", "14", "15", "15", "16", "16", "17", "17", "18", "18", "19", "19", "20", "20", "21", "22", "22", "23", "23", "24", "24", "25", "26", "27", "28", "29") |> as.factor(),
+            gender = c("M","M","M","M","F","F",
+                       "F","F","M","M","M","M","M","M","F","F","M","M",
+                       "M","M","F","F","F","F","M","M","F","F","M",
+                       "M","M","M","M","M","M","M","M","M","F","F",
+                       "M","M","M","M","M","F","F","F","F","F","F","F") |> as.factor(),
+               age = c(75L,75L,72L,72L,66L,66L,
+                       56L,56L,45L,45L,58L,58L,76L,76L,56L,56L,55L,55L,
+                       54L,54L,55L,55L,62L,62L,70L,70L,45L,45L,66L,
+                       66L,57L,57L,51L,51L,58L,58L,80L,80L,41L,41L,
+                       63L,46L,46L,76L,76L,44L,44L,72L,59L,61L,48L,43L),
+         diagnosis = c("EGC","EGC","AGC","AGC",
+                       "EGC","EGC","EGC","EGC","EGC","EGC","EGC","EGC",
+                       "EGC","EGC","EGC","EGC","EGC","EGC","EGC","EGC","AGC",
+                       "AGC","AGC","AGC","EGC","EGC","AGC","AGC","AGC",
+                       "AGC","EGC","EGC","EGC","EGC","EGC","EGC","EGC",
+                       "EGC","AGC","AGC","AGC","EGC","EGC","AGC","AGC",
+                       "AGC","AGC","CAG with IM","CSG","CSG","CSG",
+                       "CAG with IM") |> as.factor(),
+            lauren = c("Intestinal","Intestinal",
+                       "Diffuse","Diffuse","Diffuse","Diffuse","Diffuse",
+                       "Diffuse","Diffuse","Diffuse","Diffuse","Diffuse",
+                       "Intestinal","Intestinal","Diffuse","Diffuse","Intestinal",
+                       "Intestinal","Diffuse","Diffuse","Diffuse","Diffuse",
+                       "Diffuse","Diffuse","Intestinal","Intestinal",
+                       "Diffuse","Diffuse","Diffuse","Diffuse","Diffuse",
+                       "Diffuse","Intestinal","Intestinal","Intestinal","Intestinal",
+                       "Intestinal","Intestinal","Diffuse","Diffuse",
+                       "Intestinal","Intestinal","Intestinal","Diffuse","Diffuse",
+                       "Diffuse","Diffuse",NA,NA,NA,NA,NA) |> as.factor(),
+           atrophy = c("N","N","N","N","Y","Y",
+                       "Y","Y","N","N","N","N","Y","Y","N","N","Y","Y",
+                       "N","N","Y","Y","N","N","N","N","N","N","N",
+                       "N","N","N","N","N","N","N","N","N","N","N",
+                       "Y","Y","Y","Y","Y","N","N",NA,NA,NA,NA,NA) |> as.factor(),
+          location = c("LB, AW","LB, AW","LB, GC",
+                       "LB, GC","Antrum, GC, PW","Antrum, GC, PW","Antrum, PW",
+                       "Antrum, PW","MB, LC","MB, LC","UB, PW","UB, PW",
+                       "Angle, PW","Angle, PW","LB, LC","LB, LC","MB, LC",
+                       "MB, LC","LB, LC","LB, LC","MB, LC","MB, LC","LB, LC",
+                       "LB, LC","Angle-antum, AW","Angle-antum, AW",
+                       "Antrum, PW","Antrum, PW","MB, AW","MB, AW","Angle, LC",
+                       "Angle, LC","Antrum, AW","Antrum, AW","Antrum, GC",
+                       "Antrum, GC","Angle, LC","Angle, LC","UB, LC","UB, LC",
+                       "Antrum, LC","Antrum, PW","Antrum, PW",
+                       "Angle, LC Antrum, AW","Angle, LC Antrum, AW","LB, GC","LB, GC",NA,NA,
+                       NA,NA,NA) |> as.factor(),
+            pylori = c("1","1","1","1","0","0",
+                       "1","1","1","1","Equivocal","Equivocal","1","1",
+                       "1","1","1","1","1","1","1","1","1","1","1","1",
+                       "1","1","0","0","Equivocal","Equivocal","1","1",
+                       "1","1","1","1","1","1","0","1","1","1","1",
+                       "1","1","1","1","1","1","1") |> as.factor(),
+               msi = c("MSS","MSS","MSS","MSS",
+                       "MSS","MSS","MSS","MSS","MSS","MSS","MSS","MSS",
+                       "MSS","MSS","MSS","MSS","MSS","MSS","MSS","MSS","MSS",
+                       "MSS","MSS","MSS","MSS","MSS","MSS","MSS","MSS",
+                       "MSS","MSS","MSS","MSS","MSS","MSS","MSS","MSS",
+                       "MSS","MSS","MSS","MSS","MSS","MSS","MSS","MSS",
+                       "MSS","MSS",NA,NA,NA,NA,NA) |> as.factor(),
+               ebv = c(NA,NA,0L,0L,NA,NA,NA,NA,
+                       NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,0L,0L,
+                       0L,0L,NA,NA,0L,0L,0L,0L,NA,NA,NA,NA,NA,NA,
+                       NA,NA,NA,NA,NA,NA,NA,NA,NA,1L,1L,NA,NA,NA,NA,
+                       NA) |> as.factor(),
+              site = c("A", "B", "A", "B", "A", "B", "A", "B", "A", "B", "A", 
+                       "B", "A", "B", "A", "B", "A", "B", "A", "B", "A", "B", 
+                       "A", "B", "A", "B", "A", "B", "A", "B", "A", "B", "A", 
+                       "B", "A", "B", "A", "B", "A", "B", "A", "A", "B", "A", 
+                       "B", "A", "B", "A", "A", "A", "A", "A") |> as.factor(),
+             cells = c(80L,91L,553L,679L,260L,
+                       409L,236L,244L,427L,208L,1111L,383L,275L,111L,202L,
+                       389L,580L,216L,154L,208L,170L,162L,419L,544L,
+                       317L,155L,148L,274L,442L,269L,84L,331L,82L,118L,
+                       401L,203L,83L,163L,173L,39L,110L,463L,363L,162L,
+                       43L,163L,325L,253L,479L,2032L,163L,1886L)
+  ) |> mutate(sample = paste0("Pat", patient, "-", site)) |> select(-patient, -site)
+
+seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> 
+  mutate(
+    patient = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    sample = Sample |> str_extract("Pat\\d{2}-[:upper:]"))
+
+#left_join() removes rownames hence the following three steps are required to conserve them      
+# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> rownames_to_column()
+seurat_integrated2@meta.data <- left_join(seurat_integrated2@meta.data, patient_data, by = "sample")
+seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> column_to_rownames("rowname")
+```
+
+```{r pseudobulk}
+library(org.Hs.eg.db)
+
+# pseudo-bulk workflow 
+
+DefaultAssay(seurat_integrated2)
+
+cts <- AggregateExpression(seurat_integrated2, 
+                    group.by = c("SingleR.labels", "sample"),
+                    slot = "counts",
+                    assays = 'originalexp',
+                    return.seurat = FALSE)
+
+cts <- cts$originalexp
+
+cts <- cts |> as.data.frame()
+
+annots <- AnnotationDbi::select(org.Hs.eg.db, keys=rownames(cts),
+columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>  
+  filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
+  dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
+  dplyr::select(-n) |>
+  dplyr::add_count(SYMBOL) |> filter(n == 1) |>  # remove rows that map to two symbols
+  dplyr::select(-n)
+
+cts <- cts |> rownames_to_column() |> dplyr::rename(ENSEMBL = "rowname") |> right_join(annots)
+
+rownames(cts) <- cts |> pull(SYMBOL)
+
+cts <- cts |> dplyr::select(-c(ENSEMBL, GENENAME, SYMBOL))
+
+# transpose
+cts.t <- t(cts)
+
+# convert to data.frame
+cts.t <- as.data.frame(cts.t)
+
+# get values where to split
+splitRows <- gsub('_.*', '', rownames(cts.t))
+
+# split data.frame
+cts.split <- split.data.frame(cts.t,
+                 f = factor(splitRows))
+
+# fix colnames and transpose
+
+cts.split.modified <- lapply(cts.split, function(x){
+  rownames(x) <- gsub('.*_(.*)', '\\1', rownames(x))
+  t(x)
+  
+})
+
+# Let's run DE analysis with B cells
+# 1. Get counts matrix
+counts_monocytes <- cts.split.modified$Monocytes
+
+
+# 2. generate sample level metadata
+colData <- data.frame(sample = colnames(counts_monocytes))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+# perform DESeq2 ----
+
+library(DESeq2)
+# Create DESeq2 object   
+dds <- DESeqDataSetFromMatrix(countData = counts_monocytes,
+                       colData = colData,
+                       design = ~ patient + site)
+
+# filter
+# keep <- rowSums(counts(dds)) >=10
+# dds <- dds[keep,]
+
+# run DESeq2
+dds <- DESeq(dds)
+
+# Check the coefficients for the comparison
+resultsNames(dds)
+
+# Generate results object
+res <- results(dds, name = "site_non.cancer_vs_cancer")
+
+res <- as.data.frame(res)
+
+write.csv(res, file="./output/results.csv", row.names=TRUE)
 ```
 
 # Normalization
