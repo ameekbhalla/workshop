@@ -424,35 +424,19 @@ cts.split.modified <- readRDS("./output/cts.split.modified.rds")
 
 # Let's run DE analysis
 # 1. Get counts matrix
-cts.split.modified$`B cells` -> counts_B
-cts.split.modified$`Basophils` -> counts_Basophils
-cts.split.modified$`CD4+ T cells` -> counts_CD4
-cts.split.modified$`CD8+ T cells` -> counts_CD8
-cts.split.modified$`Dendritic cells` -> counts_Dendritic
-cts.split.modified$`Monocytes` -> counts_Monocytes
-cts.split.modified$`Neutrophils` -> counts_Neutrophils
-cts.split.modified$`NK` -> counts_NK
-cts.split.modified$`Progenitors` -> counts_Progenitors
-cts.split.modified$`T cells` -> counts_T
-
-
-cell_type <- vector("list", 
-                     length = length(
-                       ls() |> str_subset("counts_")
-                       )
-                     )
+cell_type <- vector("list", length = length(cts.split.modified))
 
 for (i in seq_along(cell_type))
   {
   # generate sample level metadata
-  colData <- data.frame(sample = colnames(ls() |> str_subset("counts_") |> pluck(i) |> get()) 
+  colData <- data.frame(sample = colnames(cts.split.modified[[i]]) 
                         ) |> mutate(
     patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
     site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
     site = case_when(site == "A" ~ "non.cancer",
       TRUE ~ "cancer")) |> left_join(patient_data) %>% column_to_rownames(var = 'sample')
   
-  cell_type[[i]] <- DESeqDataSetFromMatrix(countData = ls() |> str_subset("counts_") |> pluck(i) |> get(),
+  cell_type[[i]] <- DESeqDataSetFromMatrix(countData = cts.split.modified[[i]],
                                             colData = colData,
                                             design = ~ patient + site
                                             )
