@@ -349,7 +349,7 @@ patient_data <- data.frame(
                        317L,155L,148L,274L,442L,269L,84L,331L,82L,118L,
                        401L,203L,83L,163L,173L,39L,110L,463L,363L,162L,
                        43L,163L,325L,253L,479L,2032L,163L,1886L)
-  ) |> mutate(sample = paste0("Pat", patient, "-", site)) |> select(-patient, -site)
+  ) |> mutate(sample = paste0("Pat", patient, "-", site)) |> dplyr::select(-patient, -site)
 
 seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> 
   mutate(
@@ -358,7 +358,7 @@ seurat_integrated2@meta.data <- seurat_integrated2@meta.data |>
     sample = Sample |> str_extract("Pat\\d{2}-[:upper:]"))
 
 #left_join() removes rownames hence the following three steps are required to conserve them      
-# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> rownames_to_column()
+seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> rownames_to_column()
 seurat_integrated2@meta.data <- left_join(seurat_integrated2@meta.data, patient_data, by = "sample")
 seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> column_to_rownames("rowname")
 ```
@@ -417,11 +417,96 @@ cts.split.modified <- lapply(cts.split, function(x){
 
 # Let's run DE analysis with B cells
 # 1. Get counts matrix
-counts_monocytes <- cts.split.modified$Monocytes
+cts.split.modified$`B cells` -> counts_B
+cts.split.modified$`Basophils` -> counts_Basophils
+cts.split.modified$`CD4+ T cells` -> counts_CD4
+cts.split.modified$`CD8+ T cells` -> counts_CD8
+cts.split.modified$`Dendritic cells` -> counts_Dendritic
+cts.split.modified$`Monocytes` -> counts_Monocytes
+cts.split.modified$`Neutrophils` -> counts_Neutrophils
+cts.split.modified$`NK` -> counts_NK
+cts.split.modified$`Progenitors` -> counts_Progenitors
+cts.split.modified$`T cells` -> counts_T
 
 
-# 2. generate sample level metadata
-colData <- data.frame(sample = colnames(counts_monocytes))
+objects <- ls() |> str_subset("counts_")
+
+cell_types <- vector("list", length = length(objects))
+
+for (i in seq_along(cell_types))
+  {
+  #generate sample level metadata
+
+  colData <- data.frame(sample = colnames(objects[[i]] |> get()))
+
+  colData <- colData |>
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+  colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+  cell_types[[i]] <- DESeqDataSetFromMatrix(countData = objects[[i]] |> get(),
+                                            colData = colData,
+                                            design = ~ patient + site
+                                            )
+  cell_types[[i]] <- DESeq(cell_types[[i]])
+  cell_types[[i]] <- results(cell_types[[i]], name = "site_non.cancer_vs_cancer")
+  cell_types[[i]] <- as.data.frame(cell_types[[i]])
+  }
+
+
+```
+
+```{r}
+# perform DESeq2 B_cells ----
+
+library(DESeq2)
+
+colData <- data.frame(sample = colnames(counts_B))
+
+colData <- colData |>
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+# Create DESeq2 object   
+dds_B <- DESeqDataSetFromMatrix(countData = counts_B,
+                       colData = colData,
+                       design = ~ patient + site)
+
+# filter
+# keep <- rowSums(counts(dds)) >=10
+# dds <- dds[keep,]
+
+# run DESeq2
+dds_B <- DESeq(dds_B)
+
+# Check the coefficients for the comparison
+resultsNames(dds_B)
+
+# Generate results object
+res_B <- results(dds_B, name = "site_non.cancer_vs_cancer")
+
+res_B <- as.data.frame(res_B)
+
+res_B |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_B, file="./output/B_cells.csv", row.names=TRUE)
+
+remove(colData, dds_B)
+
+# perform DESeq2 Basophils----
+
+colData <- data.frame(sample = colnames(counts_Basophils))
 
 colData <- colData |> 
   mutate(
@@ -433,31 +518,608 @@ colData <- colData |>
 
 colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
 
-# perform DESeq2 ----
-
-library(DESeq2)
-# Create DESeq2 object   
-dds <- DESeqDataSetFromMatrix(countData = counts_monocytes,
+dds_Basophils <- DESeqDataSetFromMatrix(countData = counts_Basophils,
                        colData = colData,
                        design = ~ patient + site)
+
+dds_Basophils <- DESeq(dds_Basophils)
+
+resultsNames(dds_Basophils)
+
+res_Basophils <- results(dds_Basophils, name = "site_non.cancer_vs_cancer")
+
+res_Basophils <- as.data.frame(res_Basophils)
+
+res_Basophils |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Basophils, file="./output/Basophils.csv", row.names=TRUE)
+
+remove(colData, dds_Basophils)
+
+# perform DESeq2 CD4----
+colData <- data.frame(sample = colnames(counts_CD4))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_CD4 <- DESeqDataSetFromMatrix(countData = counts_CD4,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_CD4 <- DESeq(dds_CD4)
+
+resultsNames(dds_CD4)
+
+res_CD4 <- results(dds_CD4, name = "site_non.cancer_vs_cancer")
+
+res_CD4 <- as.data.frame(res_CD4)
+
+res_CD4 |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_CD4, file="./output/CD4.csv", row.names=TRUE)
+
+remove(colData, dds_CD4)
+
+# perform DESeq2 CD8 ----
+
+colData <- data.frame(sample = colnames(counts_CD8))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_CD8 <- DESeqDataSetFromMatrix(countData = counts_CD8,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_CD8 <- DESeq(dds_CD8)
+
+resultsNames(dds_CD8)
+
+res_CD8 <- results(dds_CD8, name = "site_non.cancer_vs_cancer")
+
+res_CD8 <- as.data.frame(res_CD8)
+
+res_CD8 |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_CD8, file="./output/CD8.csv", row.names=TRUE)
+
+remove(colData, dds_CD8)
+
+# perform DESeq2 Dendritic----
+
+colData <- data.frame(sample = colnames(counts_Dendritic))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Dendritic <- DESeqDataSetFromMatrix(countData = counts_Dendritic,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Dendritic <- DESeq(dds_Dendritic)
+
+resultsNames(dds_Dendritic)
+
+res_Dendritic <- results(dds_Dendritic, name = "site_non.cancer_vs_cancer")
+
+res_Dendritic <- as.data.frame(res_Dendritic)
+
+res_Dendritic |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Dendritic, file="./output/Dendritic.csv", row.names=TRUE)
+
+remove(colData, dds_Dendritic)
+
+# perform DESeq2 Monocytes----
+
+colData <- data.frame(sample = colnames(counts_Monocytes))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Monocytes <- DESeqDataSetFromMatrix(countData = counts_Monocytes,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Monocytes <- DESeq(dds_Monocytes)
+
+resultsNames(dds_Monocytes)
+
+res_Monocytes <- results(dds_Monocytes, name = "site_non.cancer_vs_cancer")
+
+res_Monocytes <- as.data.frame(res_Monocytes)
+
+res_Monocytes |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Monocytes, file="./output/Monocytes.csv", row.names=TRUE)
+
+remove(colData, dds_Monocytes)
+
+# perform DESeq2 Neutrophils----
+
+colData <- data.frame(sample = colnames(counts_Neutrophils))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Neutrophils <- DESeqDataSetFromMatrix(countData = counts_Neutrophils,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Neutrophils <- DESeq(dds_Neutrophils)
+
+resultsNames(dds_Neutrophils)
+
+res_Neutrophils <- results(dds_Neutrophils, name = "site_non.cancer_vs_cancer")
+
+res_Neutrophils <- as.data.frame(res_Neutrophils)
+
+res_Neutrophils |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Neutrophils, file="./output/Neutrophils.csv", row.names=TRUE)
+
+remove(colData, dds_Neutrophils)
+
+# perform DESeq2 NK----
+
+colData <- data.frame(sample = colnames(counts_NK))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_NK <- DESeqDataSetFromMatrix(countData = counts_NK,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_NK <- DESeq(dds_NK)
+
+resultsNames(dds_NK)
+
+res_NK <- results(dds_NK, name = "site_non.cancer_vs_cancer")
+
+res_NK <- as.data.frame(res_NK)
+
+res_NK |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_NK, file="./output/NK.csv", row.names=TRUE)
+
+remove(colData, dds_NK)
+
+# perform DESeq2 Progenitors----
+colData <- data.frame(sample = colnames(counts_Progenitors))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Progenitors <- DESeqDataSetFromMatrix(countData = counts_Progenitors,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Progenitors <- DESeq(dds_Progenitors)
+
+resultsNames(dds_Progenitors)
+
+res_Progenitors <- results(dds_Progenitors, name = "site_non.cancer_vs_cancer")
+
+res_Progenitors <- as.data.frame(res_Progenitors)
+
+res_Progenitors |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Progenitors, file="./output/Progenitors.csv", row.names=TRUE)
+
+remove(colData, dds_Progenitors)
+
+# perform DESeq2 T_cells----
+colData <- data.frame(sample = colnames(counts_T))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_T <- DESeqDataSetFromMatrix(countData = counts_T,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_T <- DESeq(dds_T)
+
+resultsNames(dds_T)
+
+res_T <- results(dds_T, name = "site_non.cancer_vs_cancer")
+
+res_T <- as.data.frame(res_T)
+
+res_T |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_T, file="./output/T_cells.csv", row.names=TRUE)
+
+remove(colData, dds_T)
+```
+
+
+```{r}
+# perform DESeq2 B_cells ----
+
+library(DESeq2)
+
+colData <- data.frame(sample = colnames(counts_B))
+
+colData <- colData |>
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+# Create DESeq2 object   
+dds_B <- DESeqDataSetFromMatrix(countData = counts_B,
+                       colData = colData,
+                       design = ~ patient + pylori)
 
 # filter
 # keep <- rowSums(counts(dds)) >=10
 # dds <- dds[keep,]
 
 # run DESeq2
-dds <- DESeq(dds)
+dds_B <- DESeq(dds_B)
 
 # Check the coefficients for the comparison
-resultsNames(dds)
+resultsNames(dds_B)
 
 # Generate results object
-res <- results(dds, name = "site_non.cancer_vs_cancer")
+p_res_B <- results(dds_B, name = "site_non.cancer_vs_cancer")
 
-res <- as.data.frame(res)
+p_res_B <- as.data.frame(p_res_B)
 
-write.csv(res, file="./output/results.csv", row.names=TRUE)
+p_res_B |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(p_res_B, file="./output/p_B_cells.csv", row.names=TRUE)
+
+remove(colData, dds_B)
+
+# perform DESeq2 Basophils----
+
+colData <- data.frame(sample = colnames(counts_Basophils))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Basophils <- DESeqDataSetFromMatrix(countData = counts_Basophils,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Basophils <- DESeq(dds_Basophils)
+
+resultsNames(dds_Basophils)
+
+res_Basophils <- results(dds_Basophils, name = "site_non.cancer_vs_cancer")
+
+res_Basophils <- as.data.frame(res_Basophils)
+
+res_Basophils |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Basophils, file="./output/Basophils.csv", row.names=TRUE)
+
+remove(colData, dds_Basophils)
+
+# perform DESeq2 CD4----
+colData <- data.frame(sample = colnames(counts_CD4))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_CD4 <- DESeqDataSetFromMatrix(countData = counts_CD4,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_CD4 <- DESeq(dds_CD4)
+
+resultsNames(dds_CD4)
+
+res_CD4 <- results(dds_CD4, name = "site_non.cancer_vs_cancer")
+
+res_CD4 <- as.data.frame(res_CD4)
+
+res_CD4 |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_CD4, file="./output/CD4.csv", row.names=TRUE)
+
+remove(colData, dds_CD4)
+
+# perform DESeq2 CD8 ----
+
+colData <- data.frame(sample = colnames(counts_CD8))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_CD8 <- DESeqDataSetFromMatrix(countData = counts_CD8,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_CD8 <- DESeq(dds_CD8)
+
+resultsNames(dds_CD8)
+
+res_CD8 <- results(dds_CD8, name = "site_non.cancer_vs_cancer")
+
+res_CD8 <- as.data.frame(res_CD8)
+
+res_CD8 |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_CD8, file="./output/CD8.csv", row.names=TRUE)
+
+remove(colData, dds_CD8)
+
+# perform DESeq2 Dendritic----
+
+colData <- data.frame(sample = colnames(counts_Dendritic))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Dendritic <- DESeqDataSetFromMatrix(countData = counts_Dendritic,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Dendritic <- DESeq(dds_Dendritic)
+
+resultsNames(dds_Dendritic)
+
+res_Dendritic <- results(dds_Dendritic, name = "site_non.cancer_vs_cancer")
+
+res_Dendritic <- as.data.frame(res_Dendritic)
+
+res_Dendritic |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Dendritic, file="./output/CD8.csv", row.names=TRUE)
+
+remove(colData, dds_Dendritic)
+
+# perform DESeq2 Monocytes----
+
+colData <- data.frame(sample = colnames(counts_Monocytes))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Monocytes <- DESeqDataSetFromMatrix(countData = counts_Monocytes,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Monocytes <- DESeq(dds_Monocytes)
+
+resultsNames(dds_Monocytes)
+
+res_Monocytes <- results(dds_Monocytes, name = "site_non.cancer_vs_cancer")
+
+res_Monocytes <- as.data.frame(res_Monocytes)
+
+res_Monocytes |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Monocytes, file="./output/Monocytes.csv", row.names=TRUE)
+
+remove(colData, dds_Monocytes)
+
+# perform DESeq2 Neutrophils----
+
+colData <- data.frame(sample = colnames(counts_Neutrophils))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Neutrophils <- DESeqDataSetFromMatrix(countData = counts_Neutrophils,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Neutrophils <- DESeq(dds_Neutrophils)
+
+resultsNames(dds_Neutrophils)
+
+res_Neutrophils <- results(dds_Neutrophils, name = "site_non.cancer_vs_cancer")
+
+res_Neutrophils <- as.data.frame(res_Neutrophils)
+
+res_Neutrophils |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Neutrophils, file="./output/Neutrophils.csv", row.names=TRUE)
+
+remove(colData, dds_Neutrophils)
+
+# perform DESeq2 NK----
+
+colData <- data.frame(sample = colnames(counts_NK))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_NK <- DESeqDataSetFromMatrix(countData = counts_NK,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_NK <- DESeq(dds_NK)
+
+resultsNames(dds_NK)
+
+res_NK <- results(dds_NK, name = "site_non.cancer_vs_cancer")
+
+res_NK <- as.data.frame(res_NK)
+
+res_NK |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_NK, file="./output/NK.csv", row.names=TRUE)
+
+remove(colData, dds_NK)
+
+# perform DESeq2 Progenitors----
+colData <- data.frame(sample = colnames(counts_Progenitors))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_Progenitors <- DESeqDataSetFromMatrix(countData = counts_Progenitors,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_Progenitors <- DESeq(dds_Progenitors)
+
+resultsNames(dds_Progenitors)
+
+res_Progenitors <- results(dds_Progenitors, name = "site_non.cancer_vs_cancer")
+
+res_Progenitors <- as.data.frame(res_Progenitors)
+
+res_Progenitors |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_Progenitors, file="./output/Progenitors.csv", row.names=TRUE)
+
+remove(colData, dds_Progenitors)
+
+# perform DESeq2 T_cells----
+colData <- data.frame(sample = colnames(counts_T))
+
+colData <- colData |> 
+  mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")
+  )
+
+colData <- left_join(colData, patient_data) %>% column_to_rownames(var = 'sample')
+
+dds_T <- DESeqDataSetFromMatrix(countData = counts_T,
+                       colData = colData,
+                       design = ~ patient + site)
+
+dds_T <- DESeq(dds_T)
+
+resultsNames(dds_T)
+
+res_T <- results(dds_T, name = "site_non.cancer_vs_cancer")
+
+res_T <- as.data.frame(res_T)
+
+res_T |> rownames_to_column() |> dplyr::filter(rowname == "NOD1")
+
+write.csv(res_T, file="./output/T_cells.csv", row.names=TRUE)
+
+remove(colData, dds_T)
 ```
+
 
 # Normalization
 Here, we'll do a straightforward "naive" normalization approach: log-transformation and library size scaling
