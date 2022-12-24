@@ -414,9 +414,14 @@ cts.split.modified <- lapply(cts.split, function(x){
   t(x)
   
 })
+
+# saveRDS(cts.split.modified, file="./output/cts.split.modified.rds")
 ```
 
 ```{r}
+cts.split.modified <- readRDS("./output/cts.split.modified.rds")
+
+
 # Let's run DE analysis
 # 1. Get counts matrix
 cts.split.modified$`B cells` -> counts_B
@@ -447,7 +452,7 @@ for (i in seq_along(cell_type))
     site = case_when(site == "A" ~ "non.cancer",
       TRUE ~ "cancer")) |> left_join(patient_data) %>% column_to_rownames(var = 'sample')
   
-  cell_type[[i]] <- DESeqDataSetFromMatrix(countData = objects[[i]] |> get(),
+  cell_type[[i]] <- DESeqDataSetFromMatrix(countData = ls() |> str_subset("counts_") |> pluck(i) |> get(),
                                             colData = colData,
                                             design = ~ patient + site
                                             )
@@ -459,9 +464,9 @@ for (i in seq_along(cell_type))
   cell_type[[i]] <- as.data.frame(cell_type[[i]])
   }
 
-results <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> dplyr::filter(rowname == "NOD1"), .id ="cell_type") 
+de_results <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> dplyr::filter(rowname == "NOD1"), .id ="cell_type") 
 
-results$cell_type <-  ls() |> str_subset("counts_")
+de_results$cell_type <-  ls() |> str_subset("counts_")
 ```
 
 # Normalization
