@@ -16,14 +16,30 @@ Sequencing data from scRNA-seq libraries is typically aligned to the transcripto
 *DISCLAIMER:* For this workshop, I will present a fairly standard workflow that is incredibly user-friendly. However, alternative tools exist for every step of the pipeline. Often, the tooling choice will largely just be a preference, but in some cases, these alternatives are demonstratably better. If you are considering getting more involved in the field, I encourage you to read the most recent benchmark papers and newest preprints--the field is still moving incredibly fast.
 
 # Load package dependencies
-```{r}
-library(Seurat)
-library(tidyverse)
-
-library(GEOquery)
-library(archive)
-library(DropletUtils)
-library(scuttle)
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  library(Seurat),
+  library(tidyverse),
+  library(datapasta),
+  # library(GEOquery),
+  # library(archive),
+  # library(DropletUtils),
+  # library(scuttle),
+  # library(tensorflow),
+  # library(cellassign), 
+  
+  library(org.Hs.eg.db),
+  
+  # automated cell type annotation ('label transfer') using reference data,
+  # library(SingleR), 
+  
+  # a large collection of reference expression datasets with curated cell type labels for use with SingleR package
+  # library(celldex), 
+  
+  # quality control and visualization for scRNA-seq data of object class SingleCellExperiment
+  library(scater),
+  library(DESeq2)
+  )
 ```
 
 # Load the data into R
@@ -226,12 +242,12 @@ fit <- cellassign(
 ```
 
 ```{r annotation}
-library(org.Hs.eg.db)
-
-library(SingleR) #automated cell type annotation ('label transfer') using reference data
-library(celldex) #a large collection of reference expression datasets with curated cell type labels for use with SingleR package
-
-library(scater) #quality control and visualization for scRNA-seq data
+# library(org.Hs.eg.db)
+# 
+# library(SingleR) #automated cell type annotation ('label transfer') using reference data
+# library(celldex) #a large collection of reference expression datasets with curated cell type labels for use with SingleR package
+# 
+# library(scater) #quality control and visualization for scRNA-seq data
 
 # seurat_integrated_two_ref <- readRDS("~/workshop/output/seurat_integrated_two_ref.rds")
 # seurat.sce <- as.SingleCellExperiment(seurat_integrated_two_ref)
@@ -265,12 +281,7 @@ seurat.sce[["SingleR.labels"]] <- predictions$labels |> as.factor()
 ```
 
 ```{r metadata}
-#appending more patient metadata columns from the paper supplementary file
-# seurat_integrated2 <- as.Seurat(seurat.sce)
-# saveRDS(seurat_integrated2, file="./output/seurat_integrated2.rds")
-
-seurat_integrated2 <- readRDS("~/workshop/output/seurat_integrated2.rds")
-
+# patient metadata columns taken from the supplementary file
 patient_data <- data.frame(
   stringsAsFactors = FALSE,
            patient = c("01", "01", "02", "02", "03", "03", "04", "04", "05", "05", "06", "06", "07", "07", "08", "08", "09", "09", "10", "10", "11", "11", "12", "12", "13", "13", "14", "14", "15", "15", "16", "16", "17", "17", "18", "18", "19", "19", "20", "20", "21", "22", "22", "23", "23", "24", "24", "25", "26", "27", "28", "29") |> as.factor(),
@@ -351,20 +362,26 @@ patient_data <- data.frame(
                        43L,163L,325L,253L,479L,2032L,163L,1886L)
   ) |> mutate(sample = paste0("Pat", patient, "-", site)) |> dplyr::select(-patient, -site)
 
-seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> 
-  mutate(
-    patient = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
-    site   = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
-    sample = Sample |> str_extract("Pat\\d{2}-[:upper:]"))
-
-#left_join() removes rownames hence the following three steps are required to conserve them      
-seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> rownames_to_column()
-seurat_integrated2@meta.data <- left_join(seurat_integrated2@meta.data, patient_data, by = "sample")
-seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> column_to_rownames("rowname")
+# # append patient metadata columns to the seurat object
+# # seurat_integrated2 <- as.Seurat(seurat.sce)
+# # saveRDS(seurat_integrated2, file="./output/seurat_integrated2.rds")
+# 
+# seurat_integrated2 <- readRDS("~/workshop/output/seurat_integrated2.rds")
+# 
+# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> 
+#   mutate(
+#     patient = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+#     site   = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+#     sample = Sample |> str_extract("Pat\\d{2}-[:upper:]"))
+# 
+# #left_join() removes rownames hence the following three steps are required to conserve them      
+# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> rownames_to_column()
+# seurat_integrated2@meta.data <- left_join(seurat_integrated2@meta.data, patient_data, by = "sample")
+# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> column_to_rownames("rowname")
 ```
 
 ```{r pseudobulk}
-library(org.Hs.eg.db)
+# library(org.Hs.eg.db)
 
 # pseudo-bulk workflow 
 
@@ -418,9 +435,8 @@ cts.split.modified <- lapply(cts.split, function(x){
 # saveRDS(cts.split.modified, file="./output/cts.split.modified.rds")
 ```
 
-```{r}
+```{r de_cancer}
 cts.split.modified <- readRDS("./output/cts.split.modified.rds")
-
 
 # Let's run DE analysis
 # 1. Get counts matrix
@@ -448,10 +464,78 @@ for (i in seq_along(cell_type))
   cell_type[[i]] <- as.data.frame(cell_type[[i]])
   }
 
-de_results <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> dplyr::filter(rowname == "NOD1"), .id ="cell_type") 
+mirs <- data.frame(
+  SYMBOL = c("hsa-miR-106a-5p", "hsa-miR-106b-5p", "hsa-miR-16-1-3p",
+             "hsa-miR-16-5p","hsa-miR-15a-5p", "hsa-miR-15b-5p",
+             "hsa-miR-1227-3p","hsa-miR-142-5p", "hsa-miR-17-5p",
+             "hsa-miR-188-3p","hsa-miR-200b-3p", "hsa-miR-200c-3p",
+             "hsa-miR-222-5p","hsa-miR-27a-3p","hsa-miR-30d-3p",
+             "hsa-miR-31-5p","hsa-miR-3194-5p","hsa-miR-324-5p",
+             "hsa-miR-331-3p","hsa-miR-34a-5p","hsa-miR-34b-5p",
+             "hsa-miR-3614-3p","hsa-miR-3616-3p","hsa-miR-369-3p",
+             "hsa-miR-374a-5p","hsa-miR-3934-5p","hsa-miR-424-5p",
+             "hsa-miR-429","hsa-miR-495-3p","hsa-miR-497-5p",
+             "hsa-miR-501-5p","hsa-miR-556-5p","hsa-miR-577",
+             "hsa-miR-628-3p","hsa-miR-671-5p","hsa-miR-7-1-3p",
+             "hsa-miR-7-2-3p","hsa-miR-877-5p","hsa-miR-93-3p",
+             "hsa-miR-940", "hsa-miR-96-5p")
+  ) |> mutate(
+  SYMBOL = str_replace(SYMBOL, "(-\\dp)?$", "HG"), # replaces -3p & -5p with HG 
+  SYMBOL = str_replace(SYMBOL, "hsa-(miR)-", "\\1"), # replace hsa-miR- with miR
+  SYMBOL = str_to_upper(SYMBOL) # converts to upper case
+               )
 
-de_results$cell_type <-  ls() |> str_subset("counts_")
+cts |> filter(str_detect(SYMBOL, "MIR")) |> inner_join(mirs, by = "SYMBOL") |> pull(SYMBOL)
+
+names(cell_type) <- cts.split.modified |> names()
+
+results_cancer <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> 
+                        dplyr::filter(rowname %in% c("NOD1", "MIR34AHG", "MIR200CHG", "MIR497HG")), .id ="cell_type") 
+
+saveRDS(results_cancer, file="./output/results_cancer.rds")
+
+results_cancer |> group_by(cell_type) |> dplyr::rename(gene = rowname, cell = cell_type, baseline = baseMean, log2fc= log2FoldChange, SE = lfcSE) |>  DT::datatable() |> DT::formatRound(digits =2, columns = 3:8)
 ```
+
+```{r de_pylori}
+cts.split.modified <- readRDS("./output/cts.split.modified.rds")
+
+# Let's run DE analysis
+# 1. Get counts matrix
+cell_type <- vector("list", length = length(cts.split.modified))
+
+for (i in seq_along(cell_type))
+  {
+  # generate sample level metadata
+  colData <- data.frame(sample = colnames(cts.split.modified[[i]]) 
+                        ) |> mutate(
+    patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    site = case_when(site == "A" ~ "non.cancer",
+      TRUE ~ "cancer")) |> left_join(patient_data) %>% column_to_rownames(var = 'sample')
+  
+  cell_type[[i]] <- DESeqDataSetFromMatrix(countData = cts.split.modified[[i]],
+                                            colData = colData,
+                                            design = ~ pylori
+                                            )
+  # run DESeq2
+  cell_type[[i]] <- DESeq(cell_type[[i]])
+
+  # Generate results object
+  cell_type[[i]] <- results(cell_type[[i]], name = "pylori_1_vs_0")
+  cell_type[[i]] <- as.data.frame(cell_type[[i]])
+  }
+
+names(cell_type) <- cts.split.modified |> names()
+
+results_pylori <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> 
+                        dplyr::filter(rowname %in% c("NOD1", "MIR34AHG", "MIR200CHG", "MIR497HG")), .id ="cell_type") 
+
+saveRDS(results_pylori, file="./output/results_pylori.rds")
+
+results_pylori |> group_by(cell_type) |> dplyr::rename(gene = rowname, cell = cell_type, baseline = baseMean, log2fc= log2FoldChange, SE = lfcSE) |>  DT::datatable() |> DT::formatRound(digits =2, columns = 3:8)
+```
+
 
 # Normalization
 Here, we'll do a straightforward "naive" normalization approach: log-transformation and library size scaling
