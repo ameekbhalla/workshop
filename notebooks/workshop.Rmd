@@ -465,7 +465,7 @@ for (i in seq_along(cell_type))
   }
 
 mirs <- data.frame(
-  SYMBOL = c("hsa-miR-106a-5p", "hsa-miR-106b-5p", "hsa-miR-16-1-3p",
+  symbol = c("hsa-miR-106a-5p", "hsa-miR-106b-5p", "hsa-miR-16-1-3p",
              "hsa-miR-16-5p","hsa-miR-15a-5p", "hsa-miR-15b-5p",
              "hsa-miR-1227-3p","hsa-miR-142-5p", "hsa-miR-17-5p",
              "hsa-miR-188-3p","hsa-miR-200b-3p", "hsa-miR-200c-3p",
@@ -480,21 +480,35 @@ mirs <- data.frame(
              "hsa-miR-7-2-3p","hsa-miR-877-5p","hsa-miR-93-3p",
              "hsa-miR-940", "hsa-miR-96-5p")
   ) |> mutate(
-  SYMBOL = str_replace(SYMBOL, "(-\\dp)?$", "HG"), # replaces -3p & -5p with HG 
-  SYMBOL = str_replace(SYMBOL, "hsa-(miR)-", "\\1"), # replace hsa-miR- with miR
-  SYMBOL = str_to_upper(SYMBOL) # converts to upper case
+  symbol = str_replace(symbol, "(-\\dp)?$", "HG"), # replaces -3p & -5p with HG 
+  symbol = str_replace(symbol, "hsa-(miR)-", "\\1"), # replace hsa-miR- with miR
+  symbol = str_to_upper(symbol) # converts to upper case
                )
 
-cts |> filter(str_detect(SYMBOL, "MIR")) |> inner_join(mirs, by = "SYMBOL") |> pull(SYMBOL)
+common_mirs <- cts.split.modified[[1]] |> as.data.frame() |> rownames_to_column() |> dplyr::select(rowname) |> filter(str_detect(rowname, "MIR")) |> inner_join(mirs, by = c("rowname" = "symbol"))
 
 names(cell_type) <- cts.split.modified |> names()
 
-results_cancer <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> 
-                        dplyr::filter(rowname %in% c("NOD1", "MIR34AHG", "MIR200CHG", "MIR497HG")), .id ="cell_type") 
+de_cancer <- map_dfr(
+  .x = cell_type,
+  ~rownames_to_column(.x) |> filter(rowname %in% c("NOD1", common_mirs)), 
+  .id ="cell_type"
+  ) 
 
-saveRDS(results_cancer, file="./output/results_cancer.rds")
+# saveRDS(de_cancer, file="./output/de_cancer.rds")
 
-results_cancer |> group_by(cell_type) |> dplyr::rename(gene = rowname, cell = cell_type, baseline = baseMean, log2fc= log2FoldChange, SE = lfcSE) |>  DT::datatable() |> DT::formatRound(digits =2, columns = 3:8)
+de_cancer <- readRDS("~/workshop/output/results_cancer.rds")
+
+de_cancer |> 
+  dplyr::rename(
+    gene = rowname,
+    cell = cell_type,
+    baseline = baseMean,
+    log2fc= log2FoldChange,
+    SE = lfcSE
+    ) |>  
+  DT::datatable() |> 
+  DT::formatRound(digits =2, columns = 3:8)
 ```
 
 ```{r de_pylori}
@@ -528,12 +542,26 @@ for (i in seq_along(cell_type))
 
 names(cell_type) <- cts.split.modified |> names()
 
-results_pylori <- map_dfr(.x = cell_type, ~rownames_to_column(.x) |> 
-                        dplyr::filter(rowname %in% c("NOD1", "MIR34AHG", "MIR200CHG", "MIR497HG")), .id ="cell_type") 
+de_pylori <- map_dfr(
+  .x = cell_type,
+  ~rownames_to_column(.x) |> filter(rowname %in% c("NOD1", common_mirs)), 
+  .id ="cell_type"
+  ) 
 
-saveRDS(results_pylori, file="./output/results_pylori.rds")
+# saveRDS(de_pylori, file="./output/de_pylori.rds")
 
-results_pylori |> group_by(cell_type) |> dplyr::rename(gene = rowname, cell = cell_type, baseline = baseMean, log2fc= log2FoldChange, SE = lfcSE) |>  DT::datatable() |> DT::formatRound(digits =2, columns = 3:8)
+de_pylori <- readRDS("~/workshop/output/de_pylori.rds")
+
+de_pylori |> 
+  dplyr::rename(
+    gene = rowname,
+    cell = cell_type,
+    baseline = baseMean,
+    log2fc= log2FoldChange,
+    SE = lfcSE
+    ) |>  
+  DT::datatable() |> 
+  DT::formatRound(digits =2, columns = 3:8)
 ```
 
 
