@@ -175,7 +175,7 @@ anchors <- FindIntegrationAnchors(object.list = results, reference = c(1, 3), re
     dims = 1:50)
 
 # integrate data
-seurat.integrated <- IntegrateData(anchorset = anchors, dims = 1:50)
+seurat.integrated <- IntegrateData(anchorset = anchors, dims = 1:50, features.to.integrate = results[[1]] |> rownames())
 
 seurat.integrated <- ScaleData(object = seurat.integrated)
 seurat.integrated <- RunPCA(object = seurat.integrated)
