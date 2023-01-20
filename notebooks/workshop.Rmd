@@ -200,7 +200,7 @@ p4 <- DimPlot(seurat.integrated, reduction = 'umap', group.by = 'Type',
               cols = c('red','green','blue'))
 ```
 
-```{r eval=FALSE, include=FALSE}
+```{r annotation1, eval=FALSE, include=FALSE}
 library(tensorflow)
 # need to install tensorflow R package first (above)
 # then run tensorflow::install_tensorflow(extra_packages='tensorflow-probability'), 
@@ -209,43 +209,52 @@ library(cellassign)
 
 # create a list of markers
 # you can find cell specific markers here: http://biocc.hrbmu.edu.cn/CellMarker/
-pbmc_marker_list <- list(
-  Monocytes = c("CD14", "CD68"),
-  `T cells` = c("CD2", "CD3D", "TRAC", "IL32", "CD3E", "PTPRC"),
-  `NK cells` = c("GZMK", "KLRF1", "CCL3", "CMC1", "NKG7", "PTPRC"),
-  `Plasma cells` = c("CD27", "IGHG1", "CD79A", "IGHG2", "PTPRC", "IGKC"),
-  `Mature B cells` = c("MS4A1", "LTB", "CD52", "IGHD", "CD79A", "PTPRC", "IGKC"))
+not_cd45_marker_list <- list(
+  endothelial = c("PLVAP", "KDR", "PTPRB"),
+  enteroendocrine = c("CHGA", "GAST", "PROX1"),
+  fibroblast = c("MMP2", "PDGFRA", "MYL9", "FN1", "CAV1"),
+  gmc = c("MUC6", "TFF2"),
+  metaplasia = c("TFF3", "CDX1", "CDX2"),
+  chief = c("PGC"),
+  goblet = c("MUC2", "ITLN1", "HES6"),
+  metaplastic.stem = c("OLFM4", "REG1A", "CLDN3"),
+  proliferative = c("CDKN2A", "MKI67", "RBP4"),
+  pmc = c("GKN1", "GKN2", "MUC5AC"),
+  tumor = c("EPCAM", "CDH17", "COL3A1", "PDGFRB")
+  )
 
 # convert your marker gene list from above to a matrix
-pbmc_marker_matrix <- marker_list_to_mat(pbmc_marker_list, include_other = FALSE)
+not_cd45_marker_matrix <- marker_list_to_mat(not_cd45_marker_list, include_other = FALSE)
 
 # make sure all your markers were actually observed in your single cell data.  Remove markers that were not detected
-marker_in_sce <- match(rownames(pbmc_marker_matrix), rowData(seurat.sce)$Symbol)
+marker_in_sce <- match(rownames(not_cd45_marker_matrix), rowData(seurat.sce)$Symbol)
 # stopifnot(all(!is.na(marker_in_sce)))
 
-pbmc_marker_matrix <- pbmc_marker_matrix |>  cbind(marker_in_sce)  |> na.omit()
+not_cd45_marker_matrix <- not_cd45_marker_matrix |>  cbind(marker_in_sce)  |> na.omit()
 
 marker_in_sce <- marker_in_sce |> na.omit()
 
 #subset data to include only markers
 sce_marker <- seurat.sce[marker_in_sce, ]
-stopifnot(all.equal(rownames(pbmc_marker_matrix), rowData(sce_marker)$Symbol))
+stopifnot(all.equal(rownames(not_cd45_marker_matrix), rowData(sce_marker)$Symbol))
 
 # compute size factors
 
-assay(seurat.sce, "counts") <- 2^(assay(seurat.sce))
+# assay(seurat.sce, "counts") <- 2^(assay(seurat.sce))
 assay(sce_marker, "counts") <- 2^(assay(sce_marker))
 
-seurat.sce <- scran::computeSumFactors(seurat.sce) # this step takes two hours
+# seurat.sce <- scran::computeSumFactors(seurat.sce) # this step takes two hours
 
 # saveRDS(seurat.sce, file="./output/seurat.sce.rds")
 # saveRDS(sce_marker, file="./output/sce_marker.rds")
 
+sf <- edgeR::calcNormFactors(counts(seurat.sce))
+
 # run cellAssign
 fit <- cellassign(
   exprs_obj = sce_marker,
-  marker_gene_info = pbmc_marker_matrix,
-  s = sizeFactors(seurat.sce),
+  marker_gene_info = not_cd45_marker_matrix,
+  s = sf,
   shrinkage = TRUE,
   max_iter_adam = 50,
   min_delta = 2,
@@ -254,7 +263,7 @@ fit <- cellassign(
 # Issue created for developer https://github.com/Irrationone/cellassign/issues/98
 ```
 
-```{r annotation}
+```{r annotation2}
 # library(org.Hs.eg.db)
 # 
 # library(SingleR) #automated cell type annotation ('label transfer') using reference data
@@ -273,7 +282,7 @@ columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>
   dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
   dplyr::select(-n)
 
-rowData(seurat.sce) <- rownames(seurat.sce) |> as.data.frame() |> dplyr::rename(ENSEMBL = 1) |> left_join(annots) |>  dplyr::rename(ensembl = ENSEMBL, Symbol = SYMBOL, gene_name = GENENAME)
+rowData(seurat.sce)$Symbol <- rownames(seurat.sce) |> as.data.frame() |> dplyr::rename(ENSEMBL = 1) |> left_join(annots) |>  dplyr::rename(ensembl = ENSEMBL, Symbol = SYMBOL, gene_name = GENENAME) |> dplyr::select(Symbol) 
 
 # seurat.sce <- seurat.sce[!is.na(rowData(seurat.sce)$Symbol), ]
 
