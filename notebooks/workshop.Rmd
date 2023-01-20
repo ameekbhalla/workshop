@@ -587,19 +587,22 @@ de_pylori |>
 ```
 
 ```{r expression_plot}
-map(.x = cts.split.modified, 
-    ~ as.data.frame(.x) |>  
-      rownames_to_column() |> 
-      filter(rowname == "NOD1") |> 
-      column_to_rownames(var = "rowname") |> 
-      pivot_longer(cols = everything(), names_to = "rowname", values_to = "count") |>
-      full_join(colData |>  rownames_to_column(), by = "rowname" ) |> 
-      ggplot(aes(x = site, y = count)) + 
-      geom_boxplot() + 
-      geom_point(shape = 1#, position = position_jitter(width = 0.01)
-                 ) +
-      ggthemes::theme_tufte()
-  )
+map_dfr(
+.x = cts.split.modified,
+~ as.data.frame(.x) |>
+rownames_to_column() |>
+filter(rowname == "PTPRC") |>
+column_to_rownames(var = "rowname") |>
+pivot_longer(cols = everything(), names_to = "rowname", values_to = "count") |>
+full_join(colData |>  rownames_to_column(), by = "rowname" ),
+.id = "label") |>
+ggplot(aes(x = site, y = count)) +
+geom_boxplot() +
+geom_point(shape = 1, position = position_jitter(width = 0.1),
+alpha = 0.20) +
+facet_grid(. ~label) +
+labs(title = "Boxplots of CD45 expression in hematopoietic cell types",
+y = "CD45 transcript count in patients (n > 20)", x = "Biopsy site")
 ```
 
 # Normalization

@@ -1,0 +1,276 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  # html_notebook: default
+  # pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  library(Seurat),
+  library(tidyverse),
+  library(datapasta),
+  # library(GEOquery),
+  # library(archive),
+  library(DropletUtils),
+  library(scuttle),
+  
+  library(org.Hs.eg.db),
+  
+  library(tensorflow), # need to install tensorflow R package first
+  # then run tensorflow::install_tensorflow(extra_packages='tensorflow-probability') 
+  library(cellassign), # then install cellassign from github: https://github.com/irrationone/cellassign
+  
+  # automated cell type annotation ('label transfer') using reference data,
+  # library(SingleR), 
+  
+  # a large collection of reference expression datasets with curated cell type labels for use with SingleR
+  # library(celldex), 
+  
+  # quality control and visualization for scRNA-seq data of object class SingleCellExperiment
+  library(scater),
+  library(DESeq2)
+  )
+```
+
+```{r qc, eval=FALSE, include=FALSE}
+# annotating the genes
+genes  <- read_tsv(
+  file = "GSE150290/GSM4546300_Pat01-A/raw_gene_bc_matrices/hg19/genes.tsv",
+  col_names = c("ensembl", "symbol"),
+  col_types = c("c", "c"),
+  trim_ws = TRUE
+  )
+
+genes <- genes |> 
+  left_join(
+    AnnotationDbi::select(
+    org.Hs.eg.db, # the database
+    keys = genes$ensembl, # which genes to look up in the database
+    keytype = "ENSEMBL", # type of identifier in the previous argument 
+    columns = c("GENENAME", "SYMBOL") # the info to get from the database
+    ) |>
+      # filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
+      dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
+      dplyr::select(-n) |>
+      dplyr::rename(ensembl = ENSEMBL, symbol = SYMBOL, role = GENENAME)
+    )
+
+# which rows are mitochondrial genes
+is.mito <- genes |> pull(symbol) |> str_which("^MT-")
+
+# which rows are hemoglobin genes
+# genes |> dplyr::slice(genes |> pull(role) |> str_which("hemoglobin"))
+# is.hemo <- genes |> pull(role) |> str_which("hemoglobin")
+
+# which rows is the cD45 gene
+# is.cd45 <- genes |> pull(ensembl) |> str_which("ENSG00000081237")
+
+patients <- list.files("GSE150290", recursive = TRUE, full.names = TRUE) |> 
+  str_extract(".*/hg19") |> 
+  na.exclude() |>  
+  unique()
+
+patients <- patients[1:2]
+
+for (i in seq_along(patients))
+  {
+  results <- read10xCounts(patients[i]) # produces an SCE object
+  
+  results <- results[ , which(emptyDrops(counts(results))$FDR <= 0.001)]
+  
+  results <- quickPerCellQC(
+    subsets = list(Mito = is.mito),
+    sub.fields = "subsets_Mito_percent",
+    x = results
+    )
+  
+  # saveRDS(
+  #   object = results, 
+  #   file =  paste0("./output/data.QCed/data.QCed", i, ".rds")
+  #   )
+  }
+```
+
+```{r cell_annotation_1, eval=FALSE, include=FALSE}
+# create a list of markers
+# you can find cell specific markers here: http://biocc.hrbmu.edu.cn/CellMarker/
+
+# 11 CD45- cell types; 33 markers
+not_cd45_marker_list <- list(
+  endothelial = c("PLVAP", "KDR", "PTPRB"),
+  enteroendocrine = c("CHGA", "GAST", "PROX1"),
+  fibroblast = c("MMP2", "PDGFRA", "MYL9", "FN1", "CAV1"),
+  gmc = c("MUC6", "TFF2"),
+  metaplastic = c("TFF3", "CDX1", "CDX2"),
+  chief = c("PGC"),
+  goblet = c("MUC2", "ITLN1", "HES6"),
+  metap.stem = c("OLFM4", "REG1A", "CLDN3"),
+  proliferative = c("CDKN2A", "MKI67", "RBP4"),
+  pmc = c("GKN1", "GKN2", "MUC5AC"),
+  tumor = c("EPCAM", "CDH17", "COL3A1", "PDGFRB")
+  )
+
+# convert your marker gene list from above to a matrix
+not_cd45_marker_matrix <- marker_list_to_mat(not_cd45_marker_list, include_other = FALSE)
+
+data.QCed1 <- readRDS("~/workshop/output/data.QCed/data.QCed1.rds")
+
+# make sure all your markers were actually observed in your single cell data  
+marker_in_sce <- base::match(
+  rownames(not_cd45_marker_matrix), rowData(data.QCed1)$Symbol
+  )
+
+# stopifnot(all(!is.na(marker_in_sce)))
+
+# remove markers that were not detected
+# marker_in_sce <- marker_in_sce |> na.omit()
+# not_cd45_marker_matrix <- not_cd45_marker_matrix |> cbind(marker_in_sce)  |> na.omit()
+
+
+for (i in seq_along(list.files("./output/data.QCed"))
+){
+  # read file
+  sce <- readRDS(list.files("./output/data.QCed", full.names = TRUE)[i])
+
+  # subset data to include only marker genes
+  sce.subset <- sce[marker_in_sce, ]
+  
+  stopifnot(all.equal(rownames(not_cd45_marker_matrix), rowData(sce.subset)$Symbol))
+  
+  sce.factors <- scran::computeSumFactors(sce) # this step takes two hours
+  
+  # run cellAssign
+  fit <- cellassign(
+    exprs_obj = sce.subset,
+    marker_gene_info = not_cd45_marker_matrix,
+    s = sizeFactors(sce.factors),
+    shrinkage = TRUE,
+    max_iter_adam = 50,
+    min_delta = 2,
+    verbose = TRUE
+    )
+  
+  # incorporate the cellAssign result into your singleCellExperiment
+  sce$cell_type <- fit$cell_type
+
+  saveRDS(
+    object = sce, 
+    file =  paste0("./output/sce/sce", i, ".rds")
+          )
+}
+```
+
+```{r data_splitting}
+# removing genes that have zero expression in all cells
+
+# Extract counts
+counts <- GetAssayData(object = seurat, slot = "counts")
+
+# Output a logical vector for every gene-by-cell combination indicating if its count is above zero
+nonzero <- counts > 0
+
+# Sums all TRUE values and returns TRUE if more than 10 TRUE values per gene
+keep_genes <- Matrix::rowSums(nonzero) >= 10
+
+# Only keeping those genes expressed in more than 10 cells
+filtered_counts <- counts[keep_genes, ]
+
+# find row corresponding to the CD45 gene
+filtered_counts |> rownames() |> as.data.frame() |> dplyr::rename(ensembl = 1) |> summarise(cd45 = str_which(ensembl, pattern = "ENSG00000081237"))
+
+# Select cells (i.e. columns) where CD45 expression equals zero
+keep_cells <- filtered_counts[1955, ] == 0
+filtered_counts2 <- filtered_counts[ , keep_cells]
+
+# Reassign to filtered Seurat object
+filtered_seurat <- CreateSeuratObject(filtered_counts2, meta.data = seurat@meta.data)
+
+seurat <- filtered_seurat
+```
+
+```{r clustering_single}
+# seurat <- as.Seurat(seurat.sce)
+
+# quick steps
+seurat <- NormalizeData(object = seurat)
+seurat <- FindVariableFeatures(object = seurat)
+seurat <- ScaleData(object = seurat)
+seurat <- RunPCA(object = seurat)
+seurat <- RunUMAP(object = seurat, dims = 1:50)
+
+seurat2 <- FindNeighbors(seurat, dims=1:30)
+seurat3 <- FindClusters(seurat2, resolution=0.2)
+seurat4 <- FindClusters(seurat2, resolution=0.8)
+
+DimPlot(seurat3, group.by = "cell_type", # labels the cells with values from your group.by variable
+        label=T)
+
+DimPlot(seurat4, group.by = "cell_type", # labels the cells with values from your group.by variable
+        label=T)
+```
+
+```{r clustering_merged, eval=FALSE, include=FALSE}
+data.QCed <- readRDS("~/workshop/output/data.QCed.rds")
+results <- data.QCed
+
+# quality control conditions applied by Cho et al; 
+# a few of them are redundant with the function quickPerCellQC()
+# (1) sd of all genes per cell < 1;
+# (2) zero UMI count for 90% of all genes;
+# (3) cells where >10% of the expression originated from mito-encoded or hemoglobin genes
+# (4) UMI values lower than 100 or larger than 20,000
+
+for (i in seq_along(results))
+  {
+  results[[i]] <- as.Seurat(results[[i]], data = NULL)
+
+  results[[i]][["percent.mt"]] <- PercentageFeatureSet(object = results[[i]], pattern = "^MT-")
+  # results[[i]][["percent.hb"]] <- PercentageFeatureSet(object = results[[i]], pattern = "^HB[^(P)]")
+
+  results[[i]] <- subset(results[[i]], subset =
+                           nCount_RNA < 20000 & # sum of counts aka library size
+                           nCount_RNA > 100 & # sum of counts aka library size
+                           nFeature_RNA > 1000 & # number of detected features
+                         # percent.hb < 10 & # will remove reticulocytes also?
+                           percent.mt < 10
+                           )
+
+  results[[i]] <- NormalizeData(object = results[[i]])
+  results[[i]] <- FindVariableFeatures(object = results[[i]])
+  results[[i]] <- ScaleData(object = results[[i]])
+  }
+
+# saveRDS(results, file="./output/results.rds")
+
+# merging instead of integrating
+seurat.merged <- merge(results[[1]], 
+                       y = c(
+                         results[[2]], results[[3]], results[[4]], results[[5]],  results[[6]],  results[[7]], results[[8]], results[[9]], results[[10]], results[[11]], results[[12]], results[[13]], results[[14]], results[[15]], results[[16]], results[[17]], results[[18]], results[[19]], results[[20]], results[[21]], results[[22]], results[[23]], results[[24]], results[[25]], results[[26]], results[[27]], results[[28]], results[[29]], results[[30]], results[[31]], results[[32]], results[[33]], results[[34]], results[[35]], results[[36]], results[[37]], results[[38]], results[[39]], results[[40]], results[[41]], results[[42]], results[[43]], results[[44]], results[[45]], results[[46]], results[[47]], results[[48]], results[[49]], results[[50]], results[[51]], results[[52]]), 
+                        add.cell.ids = c(
+                          patients |> 
+                           str_match("Pat(\\d{2})-([:upper:])") |> 
+                            as.data.frame() |> pull(1)
+                         )#, merge.data = TRUE
+                       )
+
+# saveRDS(seurat.merged, file="./output/seurat.merged.rds")
+seurat.merged <- readRDS("~/workshop/output/seurat.merged.rds")
+
+seurat.merged <- RunPCA(seurat.merged)
+seurat.merged <- RunUMAP(seurat.merged, dims = 1:30)
+
+seurat2 <- FindNeighbors(seurat, dims=1:30)
+seurat3 <- FindClusters(seurat2, resolution=0.2)
+seurat4 <- FindClusters(seurat2, resolution=0.8)
+
+DimPlot(seurat3, group.by = "cell_type", # labels the cells with values from your group.by variable
+        label=T)
+
+DimPlot(seurat4, group.by = "cell_type", # labels the cells with values from your group.by variable
+        label=T)
+```
