@@ -384,6 +384,9 @@ patient_data <- data.frame(
                        43L,163L,325L,253L,479L,2032L,163L,1886L)
   ) |> mutate(sample = paste0("Pat", patient, "-", site)) |> dplyr::select(-patient, -site)
 
+# # In wider format with separate columns for tumor and adjacent cells
+# patient_data |>  pivot_wider(names_from = "site", values_from = "cells") |> dplyr::rename(tumor = A, adjacent = B)
+
 # # append patient metadata columns to the seurat object
 # # seurat_integrated2 <- as.Seurat(seurat.sce)
 # # saveRDS(seurat_integrated2, file="./output/seurat_integrated2.rds")
