@@ -272,23 +272,17 @@ fit <- cellassign(
 # library(scater) #quality control and visualization for scRNA-seq data
 
 # seurat_integrated_two_ref <- readRDS("~/workshop/output/seurat_integrated_two_ref.rds")
-# seurat.sce <- as.SingleCellExperiment(seurat_integrated_two_ref)
+# seurat.sce <- as.SingleCellExperiment(seurat.merged)
 
 seurat.sce <- readRDS("~/workshop/output/seurat.sce.rds")
 
-annots <- AnnotationDbi::select(org.Hs.eg.db, keys=rownames(seurat.sce),
-columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>  
-  # filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
-  dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
-  dplyr::select(-n)
-
-rowData(seurat.sce)$Symbol <- rownames(seurat.sce) |> as.data.frame() |> dplyr::rename(ENSEMBL = 1) |> left_join(annots) |>  dplyr::rename(ensembl = ENSEMBL, Symbol = SYMBOL, gene_name = GENENAME) |> dplyr::select(Symbol) 
+rowData(seurat.sce)$Symbol <- genes$symbol
 
 # seurat.sce <- seurat.sce[!is.na(rowData(seurat.sce)$Symbol), ]
 
 rownames(seurat.sce) <- rowData(seurat.sce)$Symbol
 
-Monaco.data <- MonacoImmuneData(ensembl = FALSE) #114 bulk RNA-seq samples of sorted immune cell populations that can be found in GSE107011.
+Monaco.data <- MonacoImmuneData(ensembl = TRUE) #114 bulk RNA-seq samples of sorted immune cell populations that can be found in GSE107011.
 
 predictions <- SingleR(test=seurat.sce, assay.type.test=1, 
                        ref=Monaco.data, labels=Monaco.data$label.main)
