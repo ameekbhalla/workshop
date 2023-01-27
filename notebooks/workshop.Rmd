@@ -379,24 +379,24 @@ patient_data <- data.frame(
   ) |> mutate(sample = paste0("Pat", patient, "-", site)) |> dplyr::select(-patient, -site)
 
 # # In wider format with separate columns for tumor and adjacent cells
-# patient_data |>  pivot_wider(names_from = "site", values_from = "cells") |> dplyr::rename(tumor = A, adjacent = B)
+# patient_data |>  pivot_wider(names_from = "site", values_from = "cells") |> dplyr::rename(adjacent = A, tumor = B)
 
-# # append patient metadata columns to the seurat object
-# # seurat_integrated2 <- as.Seurat(seurat.sce)
-# # saveRDS(seurat_integrated2, file="./output/seurat_integrated2.rds")
-# 
-# seurat_integrated2 <- readRDS("~/workshop/output/seurat_integrated2.rds")
-# 
-# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> 
-#   mutate(
-#     patient = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
-#     site   = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
-#     sample = Sample |> str_extract("Pat\\d{2}-[:upper:]"))
-# 
-# #left_join() removes rownames hence the following three steps are required to conserve them      
-# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> rownames_to_column()
-# seurat_integrated2@meta.data <- left_join(seurat_integrated2@meta.data, patient_data, by = "sample")
-# seurat_integrated2@meta.data <- seurat_integrated2@meta.data |> column_to_rownames("rowname")
+# append patient metadata columns to the seurat object
+seurat.merged2 <- as.Seurat(seurat.sce)
+# saveRDS(seurat.merged2, file="./output/seurat.merged2.rds")
+
+seurat.merged2 <- readRDS("~/workshop/output/seurat.merged2.rds")
+
+seurat.merged2@meta.data <- seurat.merged2@meta.data |>
+  mutate(
+    patient = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
+    site   = Sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
+    sample = Sample |> str_extract("Pat\\d{2}-[:upper:]"))
+
+#left_join() removes rownames hence the following three steps are required to conserve them
+seurat.merged2@meta.data <- seurat.merged2@meta.data |> rownames_to_column()
+seurat.merged2@meta.data <- left_join(seurat.merged2@meta.data, patient_data, by = "sample")
+seurat.merged2@meta.data <- seurat.merged2@meta.data |> column_to_rownames("rowname")
 ```
 
 ```{r pseudobulk}
@@ -404,9 +404,9 @@ patient_data <- data.frame(
 
 # pseudo-bulk workflow 
 
-DefaultAssay(seurat_integrated2)
+DefaultAssay(seurat.merged2)
 
-cts <- AggregateExpression(seurat_integrated2, 
+cts <- AggregateExpression(seurat.merged2, 
                     group.by = c("SingleR.labels", "sample"),
                     slot = "counts",
                     assays = 'originalexp',
@@ -415,20 +415,6 @@ cts <- AggregateExpression(seurat_integrated2,
 cts <- cts$originalexp
 
 cts <- cts |> as.data.frame()
-
-annots <- AnnotationDbi::select(org.Hs.eg.db, keys=rownames(cts),
-columns=c("SYMBOL","GENENAME"), keytype="ENSEMBL") |>  
-  filter(!is.na(SYMBOL)) |> # remove rows that don't have a symbol
-  dplyr::add_count(ENSEMBL) |> filter(n == 1) |>  # remove rows that map to two symbols
-  dplyr::select(-n) |>
-  dplyr::add_count(SYMBOL) |> filter(n == 1) |>  # remove rows that map to two symbols
-  dplyr::select(-n)
-
-cts <- cts |> rownames_to_column() |> dplyr::rename(ENSEMBL = "rowname") |> right_join(annots)
-
-rownames(cts) <- cts |> pull(SYMBOL)
-
-cts <- cts |> dplyr::select(-c(ENSEMBL, GENENAME, SYMBOL))
 
 # transpose
 cts.t <- t(cts)
@@ -459,52 +445,124 @@ cts.split.modified <- readRDS("./output/cts.split.modified.rds")
 
 # Let's run DE analysis
 # 1. Get counts matrix
-cell_type <- vector("list", length = length(cts.split.modified))
 
-for (i in seq_along(cell_type))
+colData <- vector("list", length = length(cts.split.modified))
+
+for (i in seq_along(cts.split.modified))
   {
   # generate sample level metadata
-  colData <- data.frame(sample = colnames(cts.split.modified[[i]]) 
+  colData[[i]] <- data.frame(sample = colnames(cts.split.modified[[i]]) 
                         ) |> mutate(
     patient = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(2) |> as.factor(),
     site   = sample |> str_match("Pat(\\d{2})-([:upper:])") |> as.data.frame() |> pull(3) |> as.factor(),
     site = case_when(site == "A" ~ "non.cancer",
-      TRUE ~ "cancer")) |> left_join(patient_data) %>% column_to_rownames(var = 'sample')
-  
-  cell_type[[i]] <- DESeqDataSetFromMatrix(countData = cts.split.modified[[i]],
-                                            colData = colData,
+                     TRUE ~ "cancer") |> as.factor(),
+    histology = case_when(site == "cancer" ~ "neoplasm",
+                          patient %in% c(25:29) ~ "gastritis",
+                          TRUE ~ "normal") |> as.factor(),
+    physiology = case_when(histology == "normal" ~ "normal",
+                           TRUE ~ "abnormal") |> as.factor()) |> left_join(patient_data) %>% column_to_rownames(var = 'sample')
+}
+```
+
+```{r}
+# number of dimensions is just 41 for the seventh type of cells: investigate
+colData |> map(dim)
+```
+
+```{r site}
+site <- vector("list", length = length(cts.split.modified))
+{ 
+  site[[i]] <- DESeqDataSetFromMatrix(countData = cts.split.modified[[1]],
+                                            colData = colData[[1]],
                                             design = ~ patient + site
                                             )
   # run DESeq2
-  cell_type[[i]] <- DESeq(cell_type[[i]])
+  site[[i]] <- DESeq(site[[i]])
 
   # Generate results object
-  cell_type[[i]] <- results(cell_type[[i]], name = "site_non.cancer_vs_cancer")
-  cell_type[[i]] <- as.data.frame(cell_type[[i]])
+  site[[i]] <- results(site[[i]], name = "site_non.cancer_vs_cancer")
+  site[[i]] <- as.data.frame(site[[i]])
   }
 
-mirs <- data.frame(
-  symbol = c("hsa-miR-106a-5p", "hsa-miR-106b-5p", "hsa-miR-16-1-3p",
-             "hsa-miR-16-5p","hsa-miR-15a-5p", "hsa-miR-15b-5p",
-             "hsa-miR-1227-3p","hsa-miR-142-5p", "hsa-miR-17-5p",
-             "hsa-miR-188-3p","hsa-miR-200b-3p", "hsa-miR-200c-3p",
-             "hsa-miR-222-5p","hsa-miR-27a-3p","hsa-miR-30d-3p",
-             "hsa-miR-31-5p","hsa-miR-3194-5p","hsa-miR-324-5p",
-             "hsa-miR-331-3p","hsa-miR-34a-5p","hsa-miR-34b-5p",
-             "hsa-miR-3614-3p","hsa-miR-3616-3p","hsa-miR-369-3p",
-             "hsa-miR-374a-5p","hsa-miR-3934-5p","hsa-miR-424-5p",
-             "hsa-miR-429","hsa-miR-495-3p","hsa-miR-497-5p",
-             "hsa-miR-501-5p","hsa-miR-556-5p","hsa-miR-577",
-             "hsa-miR-628-3p","hsa-miR-671-5p","hsa-miR-7-1-3p",
-             "hsa-miR-7-2-3p","hsa-miR-877-5p","hsa-miR-93-3p",
-             "hsa-miR-940", "hsa-miR-96-5p")
-  ) |> mutate(
-  symbol = str_replace(symbol, "(-\\dp)?$", "HG"), # replaces -3p & -5p with HG 
-  symbol = str_replace(symbol, "hsa-(miR)-", "\\1"), # replace hsa-miR- with miR
-  symbol = str_to_upper(symbol) # converts to upper case
-               )
+names(site) <- cts.split.modified |> names()
 
-common_mirs <- cts.split.modified[[1]] |> as.data.frame() |> rownames_to_column() |> dplyr::select(rowname) |> filter(str_detect(rowname, "MIR")) |> inner_join(mirs, by = c("rowname" = "symbol"))
+de_site <- map_dfr(
+  .x = site,
+  ~rownames_to_column(.x) |> filter(rowname %in% c("ENSG00000106100"#, common_mirs
+                                                   )),
+  .id ="site"
+  )
+
+# saveRDS(de_site, file="./output/de_site.rds")
+
+# de_site <- readRDS("~/workshop/output/de_site.rds")
+
+de_site |> 
+  dplyr::rename(
+    gene = rowname,
+    cell = cell_type,
+    baseline = baseMean,
+    log2fc= log2FoldChange,
+    SE = lfcSE
+    ) |>  
+  DT::datatable() |> 
+  DT::formatRound(digits =2, columns = 3:8)
+```
+
+```{r histology}
+histology <- vector("list", length = length(cts.split.modified))
+{ 
+  histology[[1]] <- DESeqDataSetFromMatrix(countData = cts.split.modified[[1]],
+                                            colData = colData[[1]],
+                                            design = ~ patient + histology
+                                            )
+  # run DESeq2
+  histology[[1]] <- DESeq(histology[[1]])
+
+  # Generate results object
+  histology[[1]] <- results(histology[[1]], name = "site_non.cancer_vs_cancer")
+  histology[[1]] <- as.data.frame(histology[[1]])
+  }
+
+names(cell_type) <- cts.split.modified |> names()
+
+de_cancer <- map_dfr(
+  .x = cell_type,
+  ~rownames_to_column(.x) |> filter(rowname %in% c("NOD1", common_mirs)), 
+  .id ="cell_type"
+  ) 
+
+# saveRDS(de_cancer, file="./output/de_cancer.rds")
+
+de_cancer <- readRDS("~/workshop/output/results_cancer.rds")
+
+de_cancer |> 
+  dplyr::rename(
+    gene = rowname,
+    cell = cell_type,
+    baseline = baseMean,
+    log2fc= log2FoldChange,
+    SE = lfcSE
+    ) |>  
+  DT::datatable() |> 
+  DT::formatRound(digits =2, columns = 3:8)
+```
+
+```{r physiology}
+physiology <- vector("list", length = length(cts.split.modified))
+{ 
+  physiology[[1]] <- DESeqDataSetFromMatrix(countData = cts.split.modified[[1]],
+                                            colData = colData[[1]],
+                                            design = ~ patient + physiology
+                                            )
+  # run DESeq2
+  physiology[[1]] <- DESeq(physiology[[1]])
+
+  # Generate results object
+  physiology[[1]] <- results(physiology[[1]], name = "physiology_normal_vs_abnormal")
+  physiology[[1]] <- as.data.frame(physiology[[1]])
+  }
 
 names(cell_type) <- cts.split.modified |> names()
 
